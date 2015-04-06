@@ -12,6 +12,8 @@
 // initialize the library with the numbers of the interface pins 
 LiquidCrystal lcd(2, 3, 4, 5, 6, 7);
 
+//Arduino Vars
+int switchPin = 10;
 
 //Synth Vars
 #define CONTROL_RATE 256
@@ -23,7 +25,7 @@ Oscil <SQUARE_ANALOGUE512_NUM_CELLS, AUDIO_RATE> aSqu(SQUARE_ANALOGUE512_DATA);
 byte volume = 128; //0 - 255
 byte waveform = 0; // 0 - 3 
 int freq = 440; //~20 - ~4000
-
+bool playSound;
 
 //Sequencer Vars
 String Keys[] = { "A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#" };
@@ -44,6 +46,7 @@ int potVals[] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 int mostRecentPot = 0;
 
 
+
 void setup(){
 
 	Pot.Initialize();
@@ -61,6 +64,7 @@ void setup(){
 	lcd.clear();
 
 
+
 	aSin.setFreq(freq);
 	startMozzi(CONTROL_RATE);
 
@@ -75,30 +79,37 @@ void updateControl()
 	waveform = map(potVals[1], 0, 1023, 0, 3);
 	freq = map(potVals[2], 0, 1023, 27, 4000);
 
+	playSound = digitalRead(switchPin);
+
 	aSin.setFreq(freq);
 	aSaw.setFreq(freq);
 	aTri.setFreq(freq);
-	aSqu.setFreq(freq);
+	aSqu.setFreq(freq);	
+
+	if (!playSound)
+	{
+		volume = 0;
+	}
 	
 }
 
 int updateAudio()
 {
-	switch (waveform)
-	{
-	case 0:
-		return ((int)aSin.next() * volume) >> 8;
-		break;
-	case 1:
-		return ((int)aSqu.next() * volume) >> 8;
-		break;
-	case 2:
-		return ((int)aTri.next() * volume) >> 8;
-		break;
-	case 3:
-		return ((int)aSaw.next() * volume) >> 8;
-		break;
-	}
+		switch (waveform)
+		{
+		case 0:
+			return ((int)aSin.next() * volume) >> 8;
+			break;
+		case 1:
+			return ((int)aSqu.next() * volume) >> 8;
+			break;
+		case 2:
+			return ((int)aTri.next() * volume) >> 8;
+			break;
+		case 3:
+			return ((int)aSaw.next() * volume) >> 8;
+			break;
+		}
 }
 
 void loop()

@@ -1,3 +1,4 @@
+#include "LCD_Strings.h"
 #include <PotMUX.h>
 #include <LiquidCrystal.h>
 
@@ -10,10 +11,12 @@
 #include <EventDelay.h>
 #include <LowPassFilter.h>
 #include <mozzi_rand.h>
-
+#include <mozzi_midi.h>
+#include <mozzi_fixmath.h>
 #include <IntMap.h>
 
-#define CONTROL_RATE 64
+#define CONTROL_RATE 128
+
 
 
 // initialize the library with the numbers of the interface pins 
@@ -23,7 +26,14 @@ EventDelay infrequentDelay;
 //Arduino Vars
 int switchPin = 10;
 
-LowPassFilter lpf;
+
+
+
+bool potChanged = false;
+bool lcdNeedsRefresh = false;
+bool isSynthMode;
+
+char lcdBuffer[20];
 
 //Synth Vars
 Oscil <SIN256_NUM_CELLS, AUDIO_RATE> aSin(SIN256_DATA);
@@ -33,47 +43,50 @@ Oscil <SQUARE_ANALOGUE512_NUM_CELLS, AUDIO_RATE> aSqu(SQUARE_ANALOGUE512_DATA);
 
 byte volume = 50; //0 - 255
 byte waveform = 0; // 0 - 3 
+
+//Low Pass Filter Vars
+LowPassFilter lpf;
 byte cutoffFreq = 255;
+byte resonance = 0;
+
+//LFO Vars
+byte lfoWaveform = 0;
+
+int pitchBend = 0;
+
 int noteLength = 1000; // ~10 - ~2000
-int freq = 440; //~20 - ~4000
-bool isSynthMode;
 
-//Synth Strings
-String waveformStrings[] = { "Sine", "Square", "Triangle", "Sawtooth" };
 
-byte CScaleIndex = 0;
-int CScaleFreq[] { 261, 297, 330, 349, 392, 440, 494, 523, 494, 440, 392, 349, 330, 297, 261 };
 
 //Int Mappings
 IntMap mapTo255 = IntMap(0, 1023, 0, 255);
 int noteLengthMax = 1000;
 IntMap mapToNoteLength = IntMap(0, 1023, 0, 925);
-IntMap mapFreq = IntMap(0, 1023, 27, 4000);
+IntMap mapTo100 = IntMap(0, 1023, 0, 100);
 
-//Sequencer Vars
+//Arp Vars
+byte middleCMidi = 60;
+byte rootMidiNote = middleCMidi;
+byte midiOffset = 0;
+byte midiRange = 7;
+
+byte rootMidiIndex = 0;
+float noteFrequency;
+
+byte gatePercent = 50;
+byte modeIndex = 0;
+byte octaveShiftIndex = 3;
+byte octaveRange = 1;
+byte patternIndex = 0;
+byte insertIndex = 0;
+
 EventDelay noteLengthDelay;
 bool noteOn;
-
-/*
-String Keys[] = { "A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#" };
-int KeysLength = 12;
-
-String Modes[] = { "Major", "Dorian", "Phyrgian", "Lydian", "Mixolydian", "Minor", "Locrian" };
-int ModesLength = 7;
-
-int seqLengthMin = 1;
-int seqLengthMax = 64;
-
-int BpmMin = 40;
-int BpmMax = 220;
-*/
 
 //Potentiometer Vars
 #define NUM_POTS 8
 int potVals[] = { -1, -1, -1, -1, -1, -1, -1, -1 };
 int mostRecentPot = 0;
-
-
 
 void setup(){
 
@@ -87,73 +100,155 @@ void setup(){
 	lcd.print("   Welcome to   ");
 	lcd.setCursor(0, 1);
 	lcd.print(" the  Octoklude ");
-	delay(1500);
+	delay(1000);
 
 	lcd.clear();
 
-	infrequentDelay.set(100);
+	infrequentDelay.set(50);
 
 	noteLengthDelay.set(noteLengthMax - noteLength);
 
-	aSin.setFreq(CScaleFreq[CScaleIndex]);
-	aSaw.setFreq(CScaleFreq[CScaleIndex]);
-	aTri.setFreq(CScaleFreq[CScaleIndex]);
-	aSqu.setFreq(CScaleFreq[CScaleIndex]);
+	updateFrequency();
 
 	lpf.setCutoffFreq(cutoffFreq);
 	startMozzi(CONTROL_RATE);
 
 }
 
+//Basically updates the LCD readout and checks what mode we're in
 void infrequentControl()
 {
 	isSynthMode = digitalRead(switchPin);
 
-	lcd.clear();
-	lcd.setCursor(0, 0);
-
-	if (isSynthMode)
-	{
-		switch (mostRecentPot)
-		{
-		case 0:
-			lcd.print("Waveform:");
-			lcd.setCursor(0, 1);
-			lcd.print(waveformStrings[waveform]);
-			break;
-
-		case 1:
-			lcd.print("Filter Freq:");
-			lcd.setCursor(0, 1);
-			lcd.print(cutoffFreq);
-			break;
-
-		default:
-			break;
-		}
-	}
-	else
+	if (lcdNeedsRefresh)
 	{
 		lcd.clear();
 		lcd.setCursor(0, 0);
-		switch (mostRecentPot)
+		lcdNeedsRefresh = false;
+
+		//If in synth mode
+		if (isSynthMode)
 		{
-		case 0:
-			lcd.print("BPM:");
-			lcd.setCursor(0, 1);
-			lcd.print(60000.0/noteLength);
-			break;
+			//Big switch for Synth LCD
+			switch (mostRecentPot)
+			{
+			case 0:
+				lcd.print("Waveform:");
+				lcd.setCursor(0, 1);
+				strcpy_P(lcdBuffer, (char*)pgm_read_word(&(waveformStrings[waveform])));
+				lcd.print(lcdBuffer);
+				break;
 
-		case 1:
-			lcd.print("Frequency:");
-			lcd.setCursor(0, 1);
-			lcd.print(freq);
-			break;
+			case 1:
+				lcd.print("Filter Freq.:");
+				lcd.setCursor(0, 1);
+				lcd.print(cutoffFreq);
+				break;
+			case 2:
+				lcd.print("Filter Res.:");
+				lcd.setCursor(0, 1);
+				lcd.print(resonance);
+				break;
 
-		default:
-			break;
+			case 3:
+				lcd.print("Pitch Bend:");
+				lcd.setCursor(0, 1);
+				lcd.print(pitchBend);
+				break;
+
+			case 4:
+				lcd.print("LFO Waveform:");
+				lcd.setCursor(0, 1);
+				strcpy_P(lcdBuffer, (char*)pgm_read_word(&(waveformStrings[lfoWaveform])));
+				lcd.print(lcdBuffer);
+				break;
+
+			case 5:
+				lcd.print("LFO Depth:");
+				lcd.setCursor(0, 1);
+				lcd.print("undefined");
+				break;
+
+			case 6:
+				lcd.print("LFO Rate:");
+				lcd.setCursor(0, 1);
+				lcd.print("undefined");
+				break;
+
+			case 7:
+				lcd.print("LFO Destination:");
+				lcd.setCursor(0, 1);
+				lcd.print("undefined");
+				break;
+
+			default:
+				break;
+			}
 		}
+		//if in arp mode
+		else
+		{
+			//Big switch for Arp LCD
+			switch (mostRecentPot)
+			{
+			case 0:
+				lcd.print("BPM:");
+				lcd.setCursor(0, 1);
+				lcd.print(60000.0 / noteLength);
+				break;
 
+			case 1:
+				lcd.print("Gate Percent:");
+				lcd.setCursor(0, 1);
+				lcd.print(gatePercent);
+				break;
+
+			case 2:
+				lcd.print("Root Note:");
+				lcd.setCursor(0, 1);
+				strcpy_P(lcdBuffer, (char*)pgm_read_word(&(keyStrings[rootMidiIndex])));
+				lcd.print(lcdBuffer);
+				break;
+
+			case 3:
+				lcd.print("Mode:");
+				lcd.setCursor(0, 1);
+				strcpy_P(lcdBuffer, (char*)pgm_read_word(&(modeStrings[modeIndex])));
+				lcd.print(lcdBuffer);
+				break;
+
+			case 4:
+				lcd.print("Octave Shift:");
+				lcd.setCursor(0, 1);
+				strcpy_P(lcdBuffer, (char*)pgm_read_word(&(octaveOffsetStrings[octaveShiftIndex])));
+				lcd.print(lcdBuffer);
+				break;
+
+			case 5:
+				lcd.print("Octave Range:");
+				lcd.setCursor(0, 1);
+				lcd.print(octaveRange);
+				break;
+
+			case 6:
+				lcd.print("Pattern:");
+				lcd.setCursor(0, 1);
+				strcpy_P(lcdBuffer, (char*)pgm_read_word(&(patternStrings[patternIndex])));
+				lcd.print(lcdBuffer);
+				break;
+
+			case 7:
+				lcd.print("Insert:");
+				lcd.setCursor(0, 1);
+				strcpy_P(lcdBuffer, (char*)pgm_read_word(&(insertStrings[insertIndex])));
+				lcd.print(lcdBuffer);
+				break;
+
+			default:
+				break;
+			}
+
+		}
 	}
 
 
@@ -165,24 +260,97 @@ void frequentControl()
 {
 	//updatePots ultimately uses analogRead, which Mozzi overrides. I had to comment a line in MozziGuts.cpp:startMozzi(control_rate) to make this work. Could be too slow later?
 	//if a pot has changed, go in and change shiz
-	if (updatePots())
+	updatePots();
+	
+	if (potChanged)
 	{
-		//Synth Control Logic Here
+		lcdNeedsRefresh = true;
+
 		if (isSynthMode)
 		{
-			waveform = map(potVals[0], 0, 1023, 0, 4);
-			cutoffFreq = mapTo255(potVals[1]);
+			switch (mostRecentPot)
+			{
+			case 0:
+				waveform = map(potVals[0], 0, 1023, 0, 4);
+				break;
 
-			lpf.setCutoffFreq(cutoffFreq);
+			case 1:
+				cutoffFreq = mapTo255(potVals[1]);
+				lpf.setCutoffFreq(cutoffFreq);
+				break;
 
+			case 2:
+				resonance = mapTo255(potVals[2]);
+				lpf.setResonance(resonance);
+				break;
+
+			case 3:
+				pitchBend = map(potVals[3], 0, 1023, -200, 200);
+				updateFrequency();
+				break;
+
+			default:
+				break;
+			}		
 		}
-		//Sequencer Control Logic Here
 		else
 		{
-			noteLength = noteLengthMax - mapToNoteLength(potVals[0]);
+			//Arp Control Logic Here
+			switch (mostRecentPot)
+			{
+			case 0:
+				noteLength = noteLengthMax - mapToNoteLength(potVals[0]);
+				break;
+
+			case 1:
+				gatePercent = mapTo100(potVals[1]);
+				break;
+
+			case 2:
+				rootMidiIndex = map(potVals[2], 0, 1023, 0, 12);
+				if (rootMidiIndex == 12)
+					rootMidiIndex = 11;
+				rootMidiNote = middleCMidi + rootMidiIndex;
+				break;
+
+			case 3:
+				modeIndex = map(potVals[3], 0, 1023, 0, 7);
+				if (modeIndex == 7)
+					modeIndex = 6;
+				break;
+
+			case 4:
+				octaveShiftIndex = map(potVals[4], 0, 1023, 0, 7);
+				if (octaveShiftIndex == 7)
+					octaveShiftIndex = 6;
+				break;
+
+			case 5:
+				octaveRange = map(potVals[5], 0, 1023, 1, 4);
+				if (octaveRange == 4)
+					octaveRange = 3;
+				break;
+
+			case 6:
+				patternIndex = map(potVals[6], 0, 1023, 0, 4);
+				if (patternIndex == 4)
+					patternIndex = 3;
+				break;
+
+			case 7:
+				insertIndex = map(potVals[7], 0, 1023, 0, 5);
+				if (insertIndex == 5)
+					insertIndex = 4;
+				break;
+
+			default:
+				break;
+			}
 
 		}
+
 	}
+	
 }
 
 void noteLengthHandler()
@@ -195,12 +363,8 @@ void noteLengthHandler()
 		}
 		else
 		{
-			CScaleIndex++;
 			volume = 50;
-			aSin.setFreq(CScaleFreq[CScaleIndex % 15]);
-			aSaw.setFreq(CScaleFreq[CScaleIndex % 15]);
-			aTri.setFreq(CScaleFreq[CScaleIndex % 15]);
-			aSqu.setFreq(CScaleFreq[CScaleIndex % 15]);
+			updateFrequency();
 		}	
 
 		noteLengthDelay.set(noteLength);
@@ -228,6 +392,16 @@ void updateControl()
 	}
 
 
+}
+
+void updateFrequency()
+{
+	noteFrequency = Q16n16_mtof(rootMidiNote) + pitchBend;
+
+	aSin.setFreq(noteFrequency);
+	aSaw.setFreq(noteFrequency);
+	aTri.setFreq(noteFrequency);
+	aSqu.setFreq(noteFrequency);
 }
 
 int updateAudio()
@@ -263,11 +437,11 @@ void loop()
 }
 
 //Checks the state of all Pots, compares them to previous, if any are changed (>epsilon) new value is stored, returns true
-bool updatePots()
+void updatePots()
 {
 
-	bool potChanged = false;
-	int epsilon = 10;
+	potChanged = false;
+	int epsilon = 20;
 
 	for (int i = 0; i<NUM_POTS; i++)
 	{
@@ -282,7 +456,6 @@ bool updatePots()
 		}
 	}
 
-	return potChanged;
 }
 
 

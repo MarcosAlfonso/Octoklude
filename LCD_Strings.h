@@ -21,6 +21,13 @@ const char wave2[] PROGMEM = "Triangle";
 const char wave3[] PROGMEM = "Sawtooth";
 const char* const waveformStrings[] PROGMEM = { wave0, wave1, wave2, wave3 };
 
+//LFO Destination Strings
+const char lfoDest0[] PROGMEM = "Pitch";
+const char lfoDest1[] PROGMEM = "Gain";
+const char lfoDest2[] PROGMEM = "Filter";
+const char* const lfoDestStrings[] PROGMEM = { lfoDest0, lfoDest1, lfoDest2 };
+
+
 //Key Strings
 const char key0[] PROGMEM = "A";
 const char key1[] PROGMEM = "A#";
@@ -37,24 +44,26 @@ const char key11[] PROGMEM = "G#";
 const char* const keyStrings[] PROGMEM = { key0, key1, key2, key3, key4, key5, key6, key7, key8, key9, key10, key11 };
 
 //Mode Strings
-const char mode0[] PROGMEM = "Major";
+const char mode0[] PROGMEM = "Major (Ionian)";
 const char mode1[] PROGMEM = "Dorian";
 const char mode2[] PROGMEM = "Phyrgian";
 const char mode3[] PROGMEM = "Lydian";
 const char mode4[] PROGMEM = "Mixolydian";
-const char mode5[] PROGMEM = "Minor";
+const char mode5[] PROGMEM = "Minor (Aeolian)";
 const char mode6[] PROGMEM = "Locrian";
 const char* const modeStrings[] PROGMEM = { mode0, mode1, mode2, mode3, mode4, mode5, mode6 };
 
 //Octave Offset Strings
-const char octOff0[] PROGMEM = "-3";
-const char octOff1[] PROGMEM = "-2";
-const char octOff2[] PROGMEM = "-1";
-const char octOff3[] PROGMEM = "0";
-const char octOff4[] PROGMEM = "+1";
-const char octOff5[] PROGMEM = "+2";
-const char octOff6[] PROGMEM = "+3";
-const char* const octaveOffsetStrings[] PROGMEM = { octOff0, octOff1, octOff2, octOff3, octOff4, octOff5, octOff6 };
+const char octOff0[] PROGMEM = "-4";
+const char octOff1[] PROGMEM = "-3";
+const char octOff2[] PROGMEM = "-2";
+const char octOff3[] PROGMEM = "-1";
+const char octOff4[] PROGMEM = "0";
+const char octOff5[] PROGMEM = "+1";
+const char octOff6[] PROGMEM = "+2";
+const char octOff7[] PROGMEM = "+3";
+const char octOff8[] PROGMEM = "+4";
+const char* const octaveOffsetStrings[] PROGMEM = { octOff0, octOff1, octOff2, octOff3, octOff4, octOff5, octOff6, octOff7, octOff8 };
 
 //Pattern Strings
 const char pattern0[] PROGMEM = "Up";

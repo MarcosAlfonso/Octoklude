@@ -15,7 +15,7 @@
 #include <mozzi_fixmath.h>
 #include <IntMap.h>
 
-#define CONTROL_RATE 128
+#define CONTROL_RATE 64
 
 
 
@@ -41,7 +41,13 @@ Oscil <SAW256_NUM_CELLS, AUDIO_RATE> aSaw(SAW256_DATA);
 Oscil <TRIANGLE_ANALOGUE512_NUM_CELLS, AUDIO_RATE> aTri(TRIANGLE_ANALOGUE512_DATA);
 Oscil <SQUARE_ANALOGUE512_NUM_CELLS, AUDIO_RATE> aSqu(SQUARE_ANALOGUE512_DATA);
 
-byte volume = 50; //0 - 255
+Oscil <SIN256_NUM_CELLS, CONTROL_RATE> lSin(SIN256_DATA);
+Oscil <SAW256_NUM_CELLS, CONTROL_RATE> lSaw(SAW256_DATA);
+Oscil <TRIANGLE_ANALOGUE512_NUM_CELLS, CONTROL_RATE> lTri(TRIANGLE_ANALOGUE512_DATA);
+Oscil <SQUARE_ANALOGUE512_NUM_CELLS, CONTROL_RATE> lSqu(SQUARE_ANALOGUE512_DATA);
+
+byte volume; //0 - 255
+byte gain = 50; //0 - 100, so volume isn't ever too loud, volume = gain;
 byte waveform = 0; // 0 - 3 
 
 //Low Pass Filter Vars
@@ -51,36 +57,56 @@ byte resonance = 0;
 
 //LFO Vars
 byte lfoWaveform = 0;
+float lfoDepth = 0;
+float lfoFrequency = 6.5f;
+byte lfoDestinationIndex = 0;
+
 
 int pitchBend = 0;
 
-int noteLength = 1000; // ~10 - ~2000
-
-
-
 //Int Mappings
 IntMap mapTo255 = IntMap(0, 1023, 0, 255);
-int noteLengthMax = 1000;
+int beatLength = 1000;
+
 IntMap mapToNoteLength = IntMap(0, 1023, 0, 925);
 IntMap mapTo100 = IntMap(0, 1023, 0, 100);
 
 //Arp Vars
 byte middleCMidi = 60;
-byte rootMidiNote = middleCMidi;
-byte midiOffset = 0;
-byte midiRange = 7;
-
+int rootMidiNote = middleCMidi;
 byte rootMidiIndex = 0;
+
+byte sequenceLength = 1;
+byte sequenceIndex = 0;
+int sequenceMidiOffset = 0;
+byte upDownMult;
+
 float noteFrequency;
 
 byte gatePercent = 50;
 byte modeIndex = 0;
-byte octaveShiftIndex = 3;
-byte octaveRange = 1;
+byte octaveShiftIndex = 4;
+int octaveShiftNoteCount = 0;
 byte patternIndex = 0;
 byte insertIndex = 0;
 
-EventDelay noteLengthDelay;
+//Scale Intervals
+//T-T-s-T-T-T-s
+byte MajorIntervals[] = { 2, 2, 1, 2, 2, 2, 1 };
+//T-s-T-T-T-s-T
+byte DorianIntervals[] = { 2, 1, 2, 2, 2, 1, 2 };
+//s-T-T-T-s-T-T 	
+byte PhyrgianIntervals[] = { 1, 2, 2, 2, 1, 2, 2 };
+//T-T-T-s-T-T-s 	
+byte LydianIntervals[] = { 2, 2, 2, 1, 2, 2, 1 };
+//T-T-s-T-T-s-T
+byte MixolydianIntervals[] = { 2, 2, 1, 2, 2, 1, 2 };
+//T-s-T-T-s-T-T 	
+byte AeolianIntervals[] = { 2, 1, 2, 2, 1, 2, 2 };
+//s-T-T-s-T-T-T
+byte LocrianIntervals[] = { 1, 2, 2, 1, 2, 2, 2 };
+
+EventDelay noteDelay;
 bool noteOn;
 
 //Potentiometer Vars
@@ -105,13 +131,18 @@ void setup(){
 	lcd.clear();
 
 	infrequentDelay.set(50);
+	
+	noteDelay.set(1000);
 
-	noteLengthDelay.set(noteLengthMax - noteLength);
+
 
 	updateFrequency();
 
+
 	lpf.setCutoffFreq(cutoffFreq);
 	startMozzi(CONTROL_RATE);
+
+
 
 }
 
@@ -140,14 +171,14 @@ void infrequentControl()
 				break;
 
 			case 1:
+				lcd.print("Gain:");
+				lcd.setCursor(0, 1);
+				lcd.print(gain);
+				break;
+			case 2:
 				lcd.print("Filter Freq.:");
 				lcd.setCursor(0, 1);
 				lcd.print(cutoffFreq);
-				break;
-			case 2:
-				lcd.print("Filter Res.:");
-				lcd.setCursor(0, 1);
-				lcd.print(resonance);
 				break;
 
 			case 3:
@@ -166,19 +197,20 @@ void infrequentControl()
 			case 5:
 				lcd.print("LFO Depth:");
 				lcd.setCursor(0, 1);
-				lcd.print("undefined");
+				lcd.print(lfoDepth);
 				break;
 
 			case 6:
 				lcd.print("LFO Rate:");
 				lcd.setCursor(0, 1);
-				lcd.print("undefined");
+				lcd.print(lfoFrequency);
 				break;
 
 			case 7:
 				lcd.print("LFO Destination:");
 				lcd.setCursor(0, 1);
-				lcd.print("undefined");
+				strcpy_P(lcdBuffer, (char*)pgm_read_word(&(lfoDestStrings[lfoDestinationIndex])));
+				lcd.print(lcdBuffer);
 				break;
 
 			default:
@@ -194,7 +226,7 @@ void infrequentControl()
 			case 0:
 				lcd.print("BPM:");
 				lcd.setCursor(0, 1);
-				lcd.print(60000.0 / noteLength);
+				lcd.print(60000.0 / beatLength);
 				break;
 
 			case 1:
@@ -225,9 +257,9 @@ void infrequentControl()
 				break;
 
 			case 5:
-				lcd.print("Octave Range:");
+				lcd.print("Sequence Length:");
 				lcd.setCursor(0, 1);
-				lcd.print(octaveRange);
+				lcd.print(sequenceLength);
 				break;
 
 			case 6:
@@ -254,8 +286,6 @@ void infrequentControl()
 
 }
 
-//!!!
-//This whole function I think could be a lot more efficient if we used switches for most recent pots, not sure though
 void frequentControl()
 {
 	//updatePots ultimately uses analogRead, which Mozzi overrides. I had to comment a line in MozziGuts.cpp:startMozzi(control_rate) to make this work. Could be too slow later?
@@ -272,21 +302,41 @@ void frequentControl()
 			{
 			case 0:
 				waveform = map(potVals[0], 0, 1023, 0, 4);
+				if (waveform == 4)
+					waveform = 3;
 				break;
 
 			case 1:
-				cutoffFreq = mapTo255(potVals[1]);
-				lpf.setCutoffFreq(cutoffFreq);
+				gain = mapTo100(potVals[1]);
+
+				if (noteOn)
+					volume = gain;
 				break;
 
 			case 2:
-				resonance = mapTo255(potVals[2]);
-				lpf.setResonance(resonance);
+				cutoffFreq = mapTo255(potVals[2]);
+				lpf.setCutoffFreq(cutoffFreq);
 				break;
 
 			case 3:
-				pitchBend = map(potVals[3], 0, 1023, -200, 200);
-				updateFrequency();
+				pitchBend = map(potVals[3], 0, 1023, -500, 500);
+				break;
+
+			case 4:
+				lfoWaveform = map(potVals[4], 0, 1023, 0, 4);
+				if (lfoWaveform == 4)
+					lfoWaveform = 3;
+
+			case 5:
+				lfoDepth = potVals[5];
+
+			case 6:
+				lfoFrequency = map(potVals[6], 0, 1023, 5000, 10000);
+
+			case 7:
+				lfoDestinationIndex = map(potVals[7], 0, 1023, 0, 4);
+				if (lfoDestinationIndex == 4)
+					lfoDestinationIndex = 3;
 				break;
 
 			default:
@@ -299,7 +349,7 @@ void frequentControl()
 			switch (mostRecentPot)
 			{
 			case 0:
-				noteLength = noteLengthMax - mapToNoteLength(potVals[0]);
+				beatLength = 1080 - potVals[0];
 				break;
 
 			case 1:
@@ -308,6 +358,7 @@ void frequentControl()
 
 			case 2:
 				rootMidiIndex = map(potVals[2], 0, 1023, 0, 12);
+				restartSequence();
 				if (rootMidiIndex == 12)
 					rootMidiIndex = 11;
 				rootMidiNote = middleCMidi + rootMidiIndex;
@@ -315,20 +366,23 @@ void frequentControl()
 
 			case 3:
 				modeIndex = map(potVals[3], 0, 1023, 0, 7);
+				restartSequence();
 				if (modeIndex == 7)
 					modeIndex = 6;
 				break;
 
 			case 4:
-				octaveShiftIndex = map(potVals[4], 0, 1023, 0, 7);
-				if (octaveShiftIndex == 7)
-					octaveShiftIndex = 6;
+				octaveShiftIndex = map(potVals[4], 0, 1023, 0, 9);
+				restartSequence();
+				if (octaveShiftIndex == 9)
+					octaveShiftIndex = 8;
 				break;
 
 			case 5:
-				octaveRange = map(potVals[5], 0, 1023, 1, 4);
-				if (octaveRange == 4)
-					octaveRange = 3;
+				sequenceLength = map(potVals[5], 0, 1023, 1, 29);
+				restartSequence();
+				if (sequenceLength == 29)
+					sequenceLength = 28;
 				break;
 
 			case 6:
@@ -353,22 +407,26 @@ void frequentControl()
 	
 }
 
-void noteLengthHandler()
+void noteEvent()
 {	
 		noteOn = !noteOn;
 
-		if (!noteOn)
+		if (noteOn)
 		{
-			volume = 0;
+			volume = gain;
+			updateSequence();
+
+			noteDelay.set(beatLength*(gatePercent/100.0));
+
 		}
 		else
 		{
-			volume = 50;
-			updateFrequency();
-		}	
+			noteOn = false;
+			volume = 0;
+			noteDelay.set(beatLength*((100-gatePercent) / 100.0));
 
-		noteLengthDelay.set(noteLength);
-
+		}
+		noteDelay.start();
 }
 
 void updateControl()
@@ -382,26 +440,107 @@ void updateControl()
 	
 	frequentControl();
 
-	//noteLengthDelay is called depending on noteLength setting
-	if (noteLengthDelay.ready())
-	{
-		noteLengthHandler();
-			
+	updateFrequency();
 
-		noteLengthDelay.start();
+	//noteLengthDelay is called depending on noteLength setting
+	if (noteDelay.ready())
+	{
+		noteEvent();
 	}
 
 
 }
 
+void updateSequence()
+{	
+	upDownMult = 1;
+
+	//pattern down inverse
+	if (patternIndex == 1)
+	{
+		//upDownMult = -1;
+	}
+
+	if (sequenceIndex > sequenceLength)
+	{
+		restartSequence();
+	}
+
+	if (patternIndex == 3)
+	{
+		int low = -sequenceLength*2;
+		int high = sequenceLength*2;
+		sequenceMidiOffset = rand(low,high);
+	}
+	else
+	{
+		switch (modeIndex)
+		{
+		case 0:
+			sequenceMidiOffset += MajorIntervals[(sequenceIndex) % 7] * upDownMult;
+			break;
+		case 1:
+			sequenceMidiOffset += DorianIntervals[(sequenceIndex) % 7] * upDownMult;
+			break;
+
+		case 2:
+			sequenceMidiOffset += PhyrgianIntervals[(sequenceIndex) % 7] * upDownMult;
+			break;
+
+		case 3:
+			sequenceMidiOffset += LydianIntervals[(sequenceIndex) % 7] * upDownMult;
+
+			break;
+
+		case 4:
+			sequenceMidiOffset += MixolydianIntervals[(sequenceIndex) % 7] * upDownMult;
+			break;
+
+		case 5:
+			sequenceMidiOffset += AeolianIntervals[(sequenceIndex) % 7] * upDownMult;
+			break;
+
+		case 6:
+			sequenceMidiOffset += LocrianIntervals[(sequenceIndex) % 7] * upDownMult;
+			break;
+
+		default:
+			break;
+		}
+	}
+	
+	sequenceIndex++;
+
+}
+
+void restartSequence()
+{
+	sequenceMidiOffset = 0;
+	sequenceIndex = 0;
+}
+
 void updateFrequency()
 {
-	noteFrequency = Q16n16_mtof(rootMidiNote) + pitchBend;
+	//Calculates octave shift (12 semitones) based off knob value
+	octaveShiftNoteCount = (octaveShiftIndex - 4) * 12;
+	
+	float lfoFrequencyShift = lSin.next();
+
+	noteFrequency = Q16n16_mtof(rootMidiNote + octaveShiftNoteCount + sequenceMidiOffset) + pitchBend + lfoFrequencyShift;
+
 
 	aSin.setFreq(noteFrequency);
 	aSaw.setFreq(noteFrequency);
 	aTri.setFreq(noteFrequency);
 	aSqu.setFreq(noteFrequency);
+}
+
+void updateLFO()
+{
+	aSin.setFreq(lfoFrequency);
+	aSaw.setFreq(lfoFrequency);
+	aTri.setFreq(lfoFrequency);
+	aSqu.setFreq(lfoFrequency);
 }
 
 int updateAudio()
@@ -423,9 +562,6 @@ int updateAudio()
 			signal = ((int)aSaw.next() * volume) >> 8;
 			break;
 
-		case 4:
-			signal = ((int)aSaw.next() * volume) >> 8;
-			break;
 		}
 
 		return lpf.next(signal);

@@ -26,9 +26,6 @@ EventDelay infrequentDelay;
 //Arduino Vars
 int switchPin = 10;
 
-
-
-
 bool potChanged = false;
 bool lcdNeedsRefresh = false;
 bool isSynthMode;
@@ -41,10 +38,10 @@ Oscil <SAW256_NUM_CELLS, AUDIO_RATE> aSaw(SAW256_DATA);
 Oscil <TRIANGLE_ANALOGUE512_NUM_CELLS, AUDIO_RATE> aTri(TRIANGLE_ANALOGUE512_DATA);
 Oscil <SQUARE_ANALOGUE512_NUM_CELLS, AUDIO_RATE> aSqu(SQUARE_ANALOGUE512_DATA);
 
-Oscil <SIN256_NUM_CELLS, CONTROL_RATE> lSin(SIN256_DATA);
-Oscil <SAW256_NUM_CELLS, CONTROL_RATE> lSaw(SAW256_DATA);
-Oscil <TRIANGLE_ANALOGUE512_NUM_CELLS, CONTROL_RATE> lTri(TRIANGLE_ANALOGUE512_DATA);
-Oscil <SQUARE_ANALOGUE512_NUM_CELLS, CONTROL_RATE> lSqu(SQUARE_ANALOGUE512_DATA);
+Oscil <SIN256_NUM_CELLS, AUDIO_RATE> lSin(SIN256_DATA);
+Oscil <SAW256_NUM_CELLS, AUDIO_RATE> lSaw(SAW256_DATA);
+Oscil <TRIANGLE_ANALOGUE512_NUM_CELLS, AUDIO_RATE> lTri(TRIANGLE_ANALOGUE512_DATA);
+Oscil <SQUARE_ANALOGUE512_NUM_CELLS, AUDIO_RATE> lSqu(SQUARE_ANALOGUE512_DATA);
 
 byte volume; //0 - 255
 byte gain = 50; //0 - 100, so volume isn't ever too loud, volume = gain;
@@ -57,10 +54,11 @@ byte resonance = 0;
 
 //LFO Vars
 byte lfoWaveform = 0;
-float lfoDepth = 0;
+float lfoScale = 0;
 float lfoFrequency = 6.5f;
 byte lfoDestinationIndex = 0;
-
+int8_t lfoValue;
+int8_t volumeLFOValue;
 
 int pitchBend = 0;
 
@@ -133,10 +131,11 @@ void setup(){
 	infrequentDelay.set(50);
 	
 	noteDelay.set(1000);
-
-
-
+	
 	updateFrequency();
+	updateLFOFrequency();
+
+	Serial.begin(9600);
 
 
 	lpf.setCutoffFreq(cutoffFreq);
@@ -195,9 +194,9 @@ void infrequentControl()
 				break;
 
 			case 5:
-				lcd.print("LFO Depth:");
+				lcd.print("LFO Scale:");
 				lcd.setCursor(0, 1);
-				lcd.print(lfoDepth);
+				lcd.print(lfoScale);
 				break;
 
 			case 6:
@@ -326,17 +325,21 @@ void frequentControl()
 				lfoWaveform = map(potVals[4], 0, 1023, 0, 4);
 				if (lfoWaveform == 4)
 					lfoWaveform = 3;
+				break;
 
 			case 5:
-				lfoDepth = potVals[5];
+				lfoScale = mapTo100(potVals[5]);
+				break;
 
 			case 6:
-				lfoFrequency = map(potVals[6], 0, 1023, 5000, 10000);
+				lfoFrequency = map(potVals[6], 0, 1023, 30, 4000);
+				updateLFOFrequency();
+				break;
 
 			case 7:
-				lfoDestinationIndex = map(potVals[7], 0, 1023, 0, 4);
-				if (lfoDestinationIndex == 4)
-					lfoDestinationIndex = 3;
+				lfoDestinationIndex = map(potVals[7], 0, 1023, 0, 3);
+				if (lfoDestinationIndex == 3)
+					lfoDestinationIndex = 2;
 				break;
 
 			default:
@@ -413,7 +416,6 @@ void noteEvent()
 
 		if (noteOn)
 		{
-			volume = gain;
 			updateSequence();
 
 			noteDelay.set(beatLength*(gatePercent/100.0));
@@ -421,7 +423,6 @@ void noteEvent()
 		}
 		else
 		{
-			noteOn = false;
 			volume = 0;
 			noteDelay.set(beatLength*((100-gatePercent) / 100.0));
 
@@ -431,7 +432,6 @@ void noteEvent()
 
 void updateControl()
 {
-	//infrequentDelay is called every 640 millis i believe
 	if (infrequentDelay.ready())
 	{
 		infrequentControl();
@@ -439,6 +439,8 @@ void updateControl()
 	}
 	
 	frequentControl();
+
+	updateLFOValue();
 
 	updateFrequency();
 
@@ -523,46 +525,85 @@ void updateFrequency()
 {
 	//Calculates octave shift (12 semitones) based off knob value
 	octaveShiftNoteCount = (octaveShiftIndex - 4) * 12;
+
+	noteFrequency = Q16n16_mtof(rootMidiNote + octaveShiftNoteCount + sequenceMidiOffset) + pitchBend;
+
+	if (lfoDestinationIndex == 1 || lfoDestinationIndex == 2)
+		noteFrequency += lfoValue;
 	
-	float lfoFrequencyShift = lSin.next();
-
-	noteFrequency = Q16n16_mtof(rootMidiNote + octaveShiftNoteCount + sequenceMidiOffset) + pitchBend + lfoFrequencyShift;
-
-
 	aSin.setFreq(noteFrequency);
 	aSaw.setFreq(noteFrequency);
 	aTri.setFreq(noteFrequency);
 	aSqu.setFreq(noteFrequency);
 }
 
-void updateLFO()
+void updateLFOValue()
 {
-	aSin.setFreq(lfoFrequency);
-	aSaw.setFreq(lfoFrequency);
-	aTri.setFreq(lfoFrequency);
-	aSqu.setFreq(lfoFrequency);
+	//Get raw lfo value
+	switch (lfoWaveform)
+	{
+	case 0:
+		lfoValue = lSin.next();
+		break;
+	case 1:
+		lfoValue = lSqu.next();
+		break;
+	case 2:
+		lfoValue = lTri.next();
+		break;
+	case 3:
+		lfoValue = lSaw.next();
+		break;
+	}
+
+	lfoValue *= (lfoScale / 100.0);
+
+	volumeLFOValue = map(lfoValue, -128, 128, 0, gain);
+
+}
+
+
+void updateLFOFrequency()
+{
+	lSin.setFreq(lfoFrequency);
+	lSaw.setFreq(lfoFrequency);
+	lTri.setFreq(lfoFrequency);
+	lSqu.setFreq(lfoFrequency);
 }
 
 int updateAudio()
 {
+
 	int signal;
 
-		switch (waveform)
-		{
-		case 0:
-			signal = ((int)aSin.next() * volume) >> 8;
-			break;
-		case 1:
-			signal = ((int)aSqu.next() * volume) >> 8;
-			break;
-		case 2:
-			signal = ((int)aTri.next() * volume) >> 8;
-			break;
-		case 3:
-			signal = ((int)aSaw.next() * volume) >> 8;
-			break;
+	if (noteOn)
+	{
+		volume = gain;
+	}
 
-		}
+
+	if ((lfoDestinationIndex == 0 || lfoDestinationIndex == 2) && volume - volumeLFOValue > 0)
+		volume -= volumeLFOValue;
+
+
+	switch (waveform)
+	{
+	case 0:
+		signal = ((int)aSin.next() * volume) >> 8;
+		break;
+	case 1:
+		signal = ((int)aSqu.next() * volume) >> 8;
+		break;
+	case 2:
+		signal = ((int)aTri.next() * volume) >> 8;
+		break;
+	case 3:
+		signal = ((int)aSaw.next() * volume) >> 8;
+		break;
+
+	}
+
+
 
 		return lpf.next(signal);
 }

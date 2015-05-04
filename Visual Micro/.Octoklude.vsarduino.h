@@ -80,7 +80,6 @@ extern "C" void __cxa_pure_virtual() {;}
 #define portInputRegister(P)
 #define portModeRegister(P)
 #include <Octoklude.ino>
-#include <LCDStrings.h>
 #include <LCD_Strings.c>
 #include <LCD_Strings.h>
 #endif

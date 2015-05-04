@@ -22,9 +22,9 @@ const char wave3[] PROGMEM = "Sawtooth";
 const char* const waveformStrings[] PROGMEM = { wave0, wave1, wave2, wave3 };
 
 //LFO Destination Strings
-const char lfoDest0[] PROGMEM = "Pitch";
-const char lfoDest1[] PROGMEM = "Gain";
-const char lfoDest2[] PROGMEM = "Filter";
+const char lfoDest0[] PROGMEM = "Gain";
+const char lfoDest1[] PROGMEM = "Pitch";
+const char lfoDest2[] PROGMEM = "Gain + Pitch";
 const char* const lfoDestStrings[] PROGMEM = { lfoDest0, lfoDest1, lfoDest2 };
 
 

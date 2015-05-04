@@ -91,6 +91,7 @@ byte octaveShiftIndex = 4;
 int octaveShiftNoteCount = 0;
 byte patternIndex = 0;
 byte insertIndex = 0;
+bool insertPlayed = false;
 
 void setup(){
 
@@ -104,7 +105,7 @@ void setup(){
 	lcd.print("   Welcome to   ");
 	lcd.setCursor(0, 1);
 	lcd.print(" the  Octoklude ");
-	delay(1000);
+	delay(2500);
 
 	lcd.clear();
 
@@ -436,6 +437,13 @@ void updateControl()
 
 void updateSequence()
 {
+	if (insertPlayed)
+	{
+		insertPlayed = false;
+		sequenceIndex++;
+		return;
+	}
+
 	//pattern down inverse
 	if (patternIndex == 1)
 	{
@@ -450,7 +458,6 @@ void updateSequence()
 		{
 			upDownMult = -1;
 			sequenceIndex = 0;
-			Serial.println("going down");
 		}
 		else
 		{
@@ -511,6 +518,8 @@ void updateFrequency()
 			break;
 
 		}
+
+		insertPlayed = true;
 
 	}
 

@@ -43,16 +43,6 @@ const char key10[] PROGMEM = "G";
 const char key11[] PROGMEM = "G#";
 const char* const keyStrings[] PROGMEM = { key0, key1, key2, key3, key4, key5, key6, key7, key8, key9, key10, key11 };
 
-//Mode Strings
-const char mode0[] PROGMEM = "Major (Ionian)";
-const char mode1[] PROGMEM = "Dorian";
-const char mode2[] PROGMEM = "Phyrgian";
-const char mode3[] PROGMEM = "Lydian";
-const char mode4[] PROGMEM = "Mixolydian";
-const char mode5[] PROGMEM = "Minor (Aeolian)";
-const char mode6[] PROGMEM = "Locrian";
-const char* const modeStrings[] PROGMEM = { mode0, mode1, mode2, mode3, mode4, mode5, mode6 };
-
 //Octave Offset Strings
 const char octOff0[] PROGMEM = "-4";
 const char octOff1[] PROGMEM = "-3";
@@ -75,9 +65,9 @@ const char* const patternStrings[] PROGMEM = { pattern0, pattern1, pattern2, pat
 //Insert Strings
 const char insert0[] PROGMEM = "Off";
 const char insert1[] PROGMEM = "Low";
-const char insert2[] PROGMEM = "High";
-const char insert3[] PROGMEM = "3-1";
-const char insert4[] PROGMEM = "4-2";
+const char insert2[] PROGMEM = "Middle";
+const char insert3[] PROGMEM = "High";
+const char insert4[] PROGMEM = "Random";
 const char* const insertStrings[] PROGMEM = { insert0, insert1, insert2, insert3, insert4 };
 
 

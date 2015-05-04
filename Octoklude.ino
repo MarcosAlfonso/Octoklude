@@ -17,22 +17,27 @@
 
 #define CONTROL_RATE 64
 
-
-
 // initialize the library with the numbers of the interface pins 
 LiquidCrystal lcd(2, 3, 4, 5, 6, 7);
-EventDelay infrequentDelay;
+char lcdBuffer[20];
 
 //Arduino Vars
 int switchPin = 10;
-
 bool potChanged = false;
 bool lcdNeedsRefresh = false;
 bool isSynthMode;
 
-char lcdBuffer[20];
+//Potentiometer Vars
+#define NUM_POTS 8
+int potVals[] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+int mostRecentPot = 0;
 
-//Synth Vars
+//Int Mappings
+IntMap mapTo255 = IntMap(0, 1023, 0, 255);
+IntMap mapToNoteLength = IntMap(0, 1023, 0, 925);
+IntMap mapTo100 = IntMap(0, 1023, 0, 100);
+
+//Oscillator Waveforms
 Oscil <SIN256_NUM_CELLS, AUDIO_RATE> aSin(SIN256_DATA);
 Oscil <SAW256_NUM_CELLS, AUDIO_RATE> aSaw(SAW256_DATA);
 Oscil <TRIANGLE_ANALOGUE512_NUM_CELLS, AUDIO_RATE> aTri(TRIANGLE_ANALOGUE512_DATA);
@@ -43,14 +48,20 @@ Oscil <SAW256_NUM_CELLS, AUDIO_RATE> lSaw(SAW256_DATA);
 Oscil <TRIANGLE_ANALOGUE512_NUM_CELLS, AUDIO_RATE> lTri(TRIANGLE_ANALOGUE512_DATA);
 Oscil <SQUARE_ANALOGUE512_NUM_CELLS, AUDIO_RATE> lSqu(SQUARE_ANALOGUE512_DATA);
 
+//EventDelays
+EventDelay infrequentDelay;
+EventDelay noteDelay;
+bool noteOn;
+
+//Basic Synth Vars
 byte volume; //0 - 255
 byte gain = 50; //0 - 100, so volume isn't ever too loud, volume = gain;
 byte waveform = 0; // 0 - 3 
+int pitchBend = 0;
 
 //Low Pass Filter Vars
 LowPassFilter lpf;
 byte cutoffFreq = 255;
-byte resonance = 0;
 
 //LFO Vars
 byte lfoWaveform = 0;
@@ -60,57 +71,26 @@ byte lfoDestinationIndex = 0;
 int8_t lfoValue;
 int8_t volumeLFOValue;
 
-int pitchBend = 0;
-
-//Int Mappings
-IntMap mapTo255 = IntMap(0, 1023, 0, 255);
-int beatLength = 1000;
-
-IntMap mapToNoteLength = IntMap(0, 1023, 0, 925);
-IntMap mapTo100 = IntMap(0, 1023, 0, 100);
 
 //Arp Vars
 byte middleCMidi = 60;
 int rootMidiNote = middleCMidi;
 byte rootMidiIndex = 0;
 
-byte sequenceLength = 1;
+int beatLength = 1000;
+byte sequenceLength = 3;
 byte sequenceIndex = 0;
 int sequenceMidiOffset = 0;
-byte upDownMult;
+int sequenceIncrement = 1;
+int upDownMult = 1;
 
 float noteFrequency;
 
 byte gatePercent = 50;
-byte modeIndex = 0;
 byte octaveShiftIndex = 4;
 int octaveShiftNoteCount = 0;
 byte patternIndex = 0;
 byte insertIndex = 0;
-
-//Scale Intervals
-//T-T-s-T-T-T-s
-byte MajorIntervals[] = { 2, 2, 1, 2, 2, 2, 1 };
-//T-s-T-T-T-s-T
-byte DorianIntervals[] = { 2, 1, 2, 2, 2, 1, 2 };
-//s-T-T-T-s-T-T 	
-byte PhyrgianIntervals[] = { 1, 2, 2, 2, 1, 2, 2 };
-//T-T-T-s-T-T-s 	
-byte LydianIntervals[] = { 2, 2, 2, 1, 2, 2, 1 };
-//T-T-s-T-T-s-T
-byte MixolydianIntervals[] = { 2, 2, 1, 2, 2, 1, 2 };
-//T-s-T-T-s-T-T 	
-byte AeolianIntervals[] = { 2, 1, 2, 2, 1, 2, 2 };
-//s-T-T-s-T-T-T
-byte LocrianIntervals[] = { 1, 2, 2, 1, 2, 2, 2 };
-
-EventDelay noteDelay;
-bool noteOn;
-
-//Potentiometer Vars
-#define NUM_POTS 8
-int potVals[] = { -1, -1, -1, -1, -1, -1, -1, -1 };
-int mostRecentPot = 0;
 
 void setup(){
 
@@ -235,17 +215,16 @@ void infrequentControl()
 				break;
 
 			case 2:
-				lcd.print("Root Note:");
+				lcd.print("Start Note:");
 				lcd.setCursor(0, 1);
 				strcpy_P(lcdBuffer, (char*)pgm_read_word(&(keyStrings[rootMidiIndex])));
 				lcd.print(lcdBuffer);
 				break;
 
 			case 3:
-				lcd.print("Mode:");
+				lcd.print("Interval:");
 				lcd.setCursor(0, 1);
-				strcpy_P(lcdBuffer, (char*)pgm_read_word(&(modeStrings[modeIndex])));
-				lcd.print(lcdBuffer);
+				lcd.print(sequenceIncrement);
 				break;
 
 			case 4:
@@ -368,10 +347,10 @@ void frequentControl()
 				break;
 
 			case 3:
-				modeIndex = map(potVals[3], 0, 1023, 0, 7);
+				sequenceIncrement = map(potVals[3], 0, 1023, 1, 13);
 				restartSequence();
-				if (modeIndex == 7)
-					modeIndex = 6;
+				if (sequenceIncrement == 13)
+					sequenceIncrement = 12;
 				break;
 
 			case 4:
@@ -390,12 +369,14 @@ void frequentControl()
 
 			case 6:
 				patternIndex = map(potVals[6], 0, 1023, 0, 4);
+				restartSequence();
 				if (patternIndex == 4)
 					patternIndex = 3;
 				break;
 
 			case 7:
 				insertIndex = map(potVals[7], 0, 1023, 0, 5);
+				restartSequence();
 				if (insertIndex == 5)
 					insertIndex = 4;
 				break;
@@ -454,63 +435,41 @@ void updateControl()
 }
 
 void updateSequence()
-{	
-	upDownMult = 1;
-
+{
 	//pattern down inverse
 	if (patternIndex == 1)
 	{
-		//upDownMult = -1;
+		upDownMult = -1;
 	}
 
-	if (sequenceIndex > sequenceLength)
+	//If at end of sequence length
+	if (sequenceIndex >= sequenceLength)
 	{
-		restartSequence();
+		//if up down pattern, and going up, go down 
+		if (patternIndex == 2 && upDownMult == 1)
+		{
+			upDownMult = -1;
+			sequenceIndex = 0;
+			Serial.println("going down");
+		}
+		else
+		{
+			restartSequence();
+		}
 	}
 
+	//if pattern is set to be random
 	if (patternIndex == 3)
 	{
 		int low = -sequenceLength*2;
 		int high = sequenceLength*2;
 		sequenceMidiOffset = rand(low,high);
 	}
-	else
+	else //other patterns
 	{
-		switch (modeIndex)
-		{
-		case 0:
-			sequenceMidiOffset += MajorIntervals[(sequenceIndex) % 7] * upDownMult;
-			break;
-		case 1:
-			sequenceMidiOffset += DorianIntervals[(sequenceIndex) % 7] * upDownMult;
-			break;
-
-		case 2:
-			sequenceMidiOffset += PhyrgianIntervals[(sequenceIndex) % 7] * upDownMult;
-			break;
-
-		case 3:
-			sequenceMidiOffset += LydianIntervals[(sequenceIndex) % 7] * upDownMult;
-
-			break;
-
-		case 4:
-			sequenceMidiOffset += MixolydianIntervals[(sequenceIndex) % 7] * upDownMult;
-			break;
-
-		case 5:
-			sequenceMidiOffset += AeolianIntervals[(sequenceIndex) % 7] * upDownMult;
-			break;
-
-		case 6:
-			sequenceMidiOffset += LocrianIntervals[(sequenceIndex) % 7] * upDownMult;
-			break;
-
-		default:
-			break;
-		}
+		sequenceMidiOffset += sequenceIncrement * upDownMult;		
 	}
-	
+
 	sequenceIndex++;
 
 }
@@ -519,6 +478,7 @@ void restartSequence()
 {
 	sequenceMidiOffset = 0;
 	sequenceIndex = 0;
+	upDownMult = 1;
 }
 
 void updateFrequency()
@@ -527,6 +487,32 @@ void updateFrequency()
 	octaveShiftNoteCount = (octaveShiftIndex - 4) * 12;
 
 	noteFrequency = Q16n16_mtof(rootMidiNote + octaveShiftNoteCount + sequenceMidiOffset) + pitchBend;
+
+	//insert frequency override, for every other note
+	if (insertIndex != 0 && sequenceIndex % 2 == 1)
+	{
+		switch (insertIndex)
+		{
+		//low
+		case 1:
+			noteFrequency = Q16n16_mtof(rootMidiNote + octaveShiftNoteCount) + pitchBend;
+			break;
+		//middle
+		case 2:
+			noteFrequency = Q16n16_mtof(rootMidiNote + octaveShiftNoteCount + ((sequenceLength * sequenceIncrement) / 2)) + pitchBend;
+			break;
+		//high
+		case 3:
+			noteFrequency = Q16n16_mtof(rootMidiNote + octaveShiftNoteCount + (sequenceLength * sequenceIncrement)) + pitchBend;
+			break;
+		//random
+		case 4:
+			noteFrequency = Q16n16_mtof(rootMidiNote + octaveShiftNoteCount + sequenceMidiOffset + rand(-sequenceLength/2, sequenceLength/2)) + pitchBend;
+			break;
+
+		}
+
+	}
 
 	if (lfoDestinationIndex == 1 || lfoDestinationIndex == 2)
 		noteFrequency += lfoValue;
